@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <stdexcept>
 #include <set>
+#include <list>
+#include <map>
 using namespace std;
 
 struct order{
@@ -21,16 +23,48 @@ struct order{
 
 class matchingBook{
    
-   vector<order> sell;
-   vector<order> buy;
+   map<string,vector<order>> buyBook;
+   map<string,vector<order>> sellBook;
    public:
 
    bool searchForId(uint64_t id){
-      for(auto& c : buy)
-         if(c.id == id) return true;
+      for(auto& iter : buyBook){
+         for(auto& ord : iter.second){
+            if(id == ord.id){
+               return true;
+            }
+         }
+      }
       
-      for(auto& c : sell)
-         if(c.id == id) return true;
+      for(auto& iter: sellBook){
+         for(auto& ord: iter.second){
+            if(id == ord.id){
+               return true;
+            }
+         }
+      }
+
+      return false;
+   }
+
+   bool searchForIdAndOrder(uint64_t id, order& retOrder){
+      for(auto& iter : buyBook){
+         for(auto& ord : iter.second){
+            if(id == ord.id){
+               retOrder = ord;
+               return true;
+            }
+         }
+      }
+      
+      for(auto& iter: sellBook){
+         for(auto& ord: iter.second){
+            if(id == ord.id){
+               retOrder = ord;
+               return true;
+            }
+         }
+      }
 
       return false;
    }
@@ -49,181 +83,189 @@ class matchingBook{
    }
 
    void readNewOrder(vector<string> tokens){
+
       if(tokens.size() != 8){
          cout << tokens[1] << " - Reject - 303 - Invalid order details\n";
       }
-      size_t sz{0};
+
       order order = createNewOrder(tokens);
-      for(auto & c : buy){
-         if(order.id == c.id){
-            cout << tokens[1] << " - Reject - 303 - Invalid order details\n";
-            return;
-         }
-      }
-      for(auto & c : sell){
-         if(order.id == c.id){
-            cout << tokens[1] << " - Reject - 303 - Invalid order details\n";
-            return;
-         }
-      }
+
       if( searchForId(order.id) ){
+
          cout << tokens[1] << " - Reject - 303 - Invalid order details\n";
+
       } else if (order.side == 'B'){
-         buy.push_back(order);
+
+         buyBook[order.symbol].push_back(order);
+
       }else if( order.side == 'S'){
-         sell.push_back(order);
+
+         sellBook[order.symbol].push_back(order);
+
       }else{
+
          cout << tokens[1] << " - Reject - 303 - Invalid order details\n";
+
       }
+
       cout << order.id << " - Accept\n";
    }
 
 void processAmend(vector<string> tokens){
-   size_t sz{0};
    order order = createNewOrder(tokens);
-   for(auto & c : buy){
-      if( c.id == order.id ){
-         if(   c.timestamp <= order.timestamp &&
-               c.symbol == order.symbol &&
-               c.type == order.type &&
-               c.side == order.side
-            ){
-               c.price = order.price;
-               c.quantity = order.quantity;
-               cout << c.id << "- AmendAccept\n";
-               return;
+   if( !searchForId(order.id) ){
+      cout << order.id << "AmendReject - 404 - Order does not exist\n";
+   }
+   if(order.side == 'B'){
+      for(auto& iter : buyBook){
+         for(auto& ord : iter.second){
+            if(   ord.timestamp <= order.timestamp &&
+                  ord.symbol == order.symbol &&
+                  ord.type == order.type &&
+                  ord.side == order.side
+               ){
+                  ord.price = order.price;
+                  ord.quantity = order.quantity;
+                  cout << ord.id << "- AmendAccept\n";
+                  return;
+            }
          }
       }
-   }
-   for(auto & c : sell){
-      if( c.id == order.id ){
-         if(   c.timestamp <= order.timestamp &&
-               c.symbol == order.symbol &&
-               c.type == order.type &&
-               c.side == order.side
-            ){
-               c.price = order.price;
-               c.quantity = order.quantity;
-               cout << c.id << "- AmendAccept\n";
-               return;
+   }else{
+      for(auto& iter: sellBook){
+         for(auto& ord: iter.second){
+            if(   ord.timestamp <= order.timestamp &&
+                  ord.symbol == order.symbol &&
+                  ord.type == order.type &&
+                  ord.side == order.side
+               ){
+                  ord.price = order.price;
+                  ord.quantity = order.quantity;
+                  cout << ord.id << "- AmendAccept\n";
+                  return;
+            }
          }
       }
    }
    cout << order.id << "AmendReject - 404 - Order does not exist\n";
 }
 
-void processCancel(vector<string> tokens){
-   struct order order; //= createNewOrder(tokens);
-   
-   order.id = stoul(tokens[1]);
-   order.timestamp = stoul(tokens[2]);
 
-   for(int i = 0; i < buy.size(); ++i){
-      struct order tmp = buy[i];
-      if( tmp.id == order.id && tmp.timestamp <= order.timestamp ){
-         cout << tmp.id << " - CancelAccept" << "\n";
-         buy.erase(buy.begin()+i);
-         return;
+ map<string,vector<order>>::iterator getMapBookByOrder(order order){
+   
+   auto buyIter = buyBook.begin();
+   auto sellIter = sellBook.begin();
+
+   while( buyIter != buyBook.end() ){
+      for(auto& ord : buyIter->second){
+         if(order.id == ord.id){
+            return buyIter;
+         }
+      }
+      ++buyIter;
+   }
+   while( sellIter != sellBook.end() ){
+      for(auto& ord: sellIter->second){
+         if(order.id == ord.id){
+            return sellIter;
+         }
       }
    }
-   for(int i = 0; i < sell.size(); ++i){
-      struct order tmp = sell[i];
-      if( tmp.id == order.id && tmp.timestamp <= order.timestamp ){
+   return buyBook.end();
+}
+
+void processCancel(vector<string> tokens){
+   struct order order;
+   order.id = stoul(tokens[1]);
+   order.timestamp = stoul(tokens[2]);
+   auto bookIter = getMapBookByOrder(order);
+   if(bookIter == buyBook.end()){
+      cout << order.id << " - CancelReject - 404 - Order does not exist\n";
+      return;
+   }
+   for(int i = 0; i < bookIter->second.size(); ++i){
+      struct order tmp = bookIter->second[i];
+      if(tmp.id == order.id && tmp.timestamp <= order.timestamp){
          cout << tmp.id << " - CancelAccept" << "\n";
-         sell.erase(sell.begin()+i);
+         bookIter->second.erase(bookIter->second.begin()+i);
          return;
       }
    }
    cout << order.id << " - CancelReject - 404 - Order does not exist\n";
 }
 
-// struct matchSymbol{
-//    inline bool operator() (const order& lhs, const order& rhs){
-//       return (lhs.symbol <= rhs.symbol &&
-//              lhs.price < rhs.price );
-//    }
-// };
-
-struct matchPrice{
+class matchSellPrice{
+   public:
+   const string s{""};
+   matchSellPrice() {}
+   matchSellPrice(string s) : s{s} {}
    inline bool operator() (const order& lhs, const order& rhs){
-      if(lhs.symbol <= rhs.symbol ){
-         return lhs.price < rhs.price;
+      if( lhs.symbol <= rhs.symbol ){
+         if(lhs.price < rhs.price){
+            return true;
+         }else if(lhs.price == rhs.price) {
+            if(lhs.timestamp < rhs.timestamp){
+               return true;
+            }else{
+               return false;
+            }
+         }else{
+            return false;
+         }
+      }else{
+         return false;
       }
-      return false;
    }
 };
 
-
-
-// void matchOrder(uint64_t timestamp, string symbol){
-//    if(symbol.size()){
-//       // sort by symbol and price and timestamp
-//       sort(buy.begin(), buy.end(), matchSymbol());
-//       sort(sell.begin(), sell.end(), matchSymbol());
-//    }else{
-//       sort(buy.begin(), buy.end(), matchPrice());
-//       sort(sell.begin(), sell.end(), matchPrice());
-//    }
-// }
-
-//void 
-
-void processMatch(vector<string> tokens){
-   uint64_t id{0};
-   string symbol{""};
-   // if(isdigit(tokens[0][0])){
-
-   // }
-   //matchOrder();
-}
-
-int getBestSell(string symbol, int i){
-   for(; i < sell.size(); ++i){
-      if( sell[i].symbol == symbol ){
-         return i;
+class matchBuyPrice{
+   public:
+   const string s{""};
+   matchBuyPrice() {}
+   matchBuyPrice(string s) : s{s} {}
+   inline bool operator() (const order& lhs, const order& rhs){
+      if( lhs.symbol <= rhs.symbol ){
+         if(lhs.price > rhs.price){
+            return true;
+         }else if(lhs.price == rhs.price) {
+            if(lhs.timestamp < rhs.timestamp){
+               return true;
+            }else{
+               return false;
+            }
+         }else{
+            return false;
+         }
+      }else{
+         return false;
       }
    }
-   return -1;
+};
+
+void processMatch(vector<string> tokens){
+   // uint64_t timestamp{0};
+   // string symbol{""};
+   // sort(buyBook.begin(), buyBook.end(), matchBuyPrice() );
+   // sort(sellBook.begin(), sellBook.end(), matchSellPrice() );
+   // auto buyIter = buyBook.begin();
+   // auto sellIter = sellBook.begin();
+   // if(tokens.size() == 2){
+
+   // }else{
+   //    while(buyIter != buyBook.end()  && 
+   //          sellIter != sellBook.end() && 
+   //          buyIter->symbol != sellIter->symbol){
+   //       ++buyIter;
+   //       ++sellIter;
+   //    }
+   //    // if any iter is invalid then there is no match
+   //    if(buyIter == buyBook.end() || sellIter == sellBook.end()) return;
+   //    while()
+   // }
 }
 
-void queryAll(){
-   sort(buy.begin(), buy.end(), matchPrice());
-   sort(sell.begin(), sell.end(), matchPrice());
-   //int i = 0;
-   int j = 0;
-}
-
-set<string> getAllSymbols(){
-   set<string> ans;
-   for(auto& o : buy){
-      ans.emplace(o.symbol);
-   }
-   for(auto& o : sell){
-      ans.emplace(o.symbol);
-   }
-   return ans;
-}
 void processQuery(vector<string> tokens){
-   // if(tokens.size() == 1){
 
-   // }
-   // set<string> symbols = getAllSymbols();
-   // //sort(symbols.begin(),symbols.end());
-   // sort(buy.begin(), buy.end(),matchPrice());
-   // sort(sell.begin(), sell.end(),matchPrice());
-   // auto iter = symbols.begin();
-   // while(iter != symbols.end()){
-   //    vector<order> temp1;
-   //    vector<order> temp2;
-   //    for(auto & c : buy)
-   //       if(c.symbol == *iter) temp1.push_back(c);
-   //    for(auto & c : sell)
-   //       if(c.symbol == *iter) temp2.push_back(c);
-   //    sort(temp1.begin(), temp1.end(),matchPrice());
-   //    sort(temp2.begin(), temp2.end(),matchPrice());
-
-   //    ++iter;
-   // }
 }
 
 };
